@@ -4,6 +4,7 @@ import time
 import tempfile
 import asyncio
 import shutil
+import inspect
 import flet as ft
 import edge_tts
 
@@ -526,16 +527,30 @@ async def main(page: ft.Page):
             return
         try:
             file_name = os.path.basename(path)
-            destination = await file_picker.save_file(
-                dialog_title=f"{label} ဖိုင် သိမ်းရန်",
-                file_name=file_name,
-                allowed_extensions=[extension],
-            )
+            with open(path, "rb") as source_file:
+                file_bytes = source_file.read()
+
+            # Flet versions differ: newer FilePicker APIs require src_bytes on Android.
+            # Use it when supported; keep a compatibility fallback for older APIs.
+            save_parameters = inspect.signature(file_picker.save_file).parameters
+            save_kwargs = {
+                "dialog_title": f"{label} ဖိုင် သိမ်းရန်",
+                "file_name": file_name,
+                "allowed_extensions": [extension],
+            }
+            if "src_bytes" in save_parameters:
+                save_kwargs["src_bytes"] = file_bytes
+
+            destination = await file_picker.save_file(**save_kwargs)
             if not destination:
                 status_label.value = f"ℹ️ {label} သိမ်းဆည်းမှုကို ပယ်ဖျက်လိုက်ပါပြီ။"
                 status_label.color = TEXT_MUTED
+            elif "src_bytes" in save_parameters:
+                # The Android picker writes the provided bytes to the selected destination.
+                status_label.value = f"✅ {label} ဖိုင် သိမ်းပြီးပါပြီ။"
+                status_label.color = "#10B981"
             else:
-                # Flet 0.25.2 returns a destination path; copy the generated file there.
+                # Older Flet versions return a path and expect Python to copy the file.
                 shutil.copyfile(path, destination)
                 status_label.value = f"✅ {label} ဖိုင် သိမ်းပြီးပါပြီ။"
                 status_label.color = "#10B981"
@@ -613,7 +628,7 @@ async def main(page: ft.Page):
             page.update()
 
     async def start_generation(e):
-        nonlocal current_mp3_path, current_srt_path, is_playing, is_paused, playback_completed, audio_player
+        nonlocal current_mp3_path, current_srt_path, is_playing, is_paused, playback_completed, audio_player, playback_timer_task
         script = normalize_script(script_input.value)
         if not script:
             status_label.value = "⚠️ ကျေးဇူးပြု၍ Script စာသား အရင်ထည့်ပေးပါ။"
@@ -663,13 +678,14 @@ async def main(page: ft.Page):
             current_srt_path = srt_file
 
             # Replace the previous Audio service only after both files exist.
+            if playback_timer_task is not None:
+                playback_timer_task.cancel()
+                playback_timer_task = None
             detach_audio_player(audio_player)
             audio_player = ft.Audio(
                 src=current_mp3_path,
                 autoplay=False,
                 on_state_changed=on_audio_state_changed,
-                width=0,
-                height=0,
             )
             attach_audio_player(audio_player)
 
