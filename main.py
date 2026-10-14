@@ -178,8 +178,9 @@ async def main(page: ft.Page):
     current_srt_path = None
     is_playing = False
 
-    audio_player = ft.Audio(autoplay=False)
-    page.overlay.append(audio_player)
+    # Flet 0.25.2 requires Audio to have a source when it is created.
+    # Create the Audio control only after an MP3 file has been generated.
+    audio_player = None
 
     header_banner = ft.Container(
         gradient=ft.LinearGradient(
@@ -434,7 +435,7 @@ async def main(page: ft.Page):
 
     def toggle_play(e):
         nonlocal is_playing
-        if not current_mp3_path:
+        if not current_mp3_path or audio_player is None:
             return
         if not is_playing:
             audio_player.play()
@@ -507,7 +508,7 @@ async def main(page: ft.Page):
     btn_text = ft.Text("🎙️ AUDIO + SRT စတင်ထုတ်မယ်", size=15, weight=ft.FontWeight.BOLD, color="#FFFFFF")
 
     async def start_generation(e):
-        nonlocal current_mp3_path, current_srt_path, is_playing
+        nonlocal current_mp3_path, current_srt_path, is_playing, audio_player
         script = normalize_script(script_input.value)
         if not script:
             status_label.value = "⚠️ ကျေးဇူးပြု၍ Script စာသား အရင်ထည့်ပေးပါ။"
@@ -555,7 +556,18 @@ async def main(page: ft.Page):
 
             current_mp3_path = mp3_file
             current_srt_path = srt_file
-            audio_player.src = current_mp3_path
+
+            # Create Audio only after a real MP3 source exists.
+            # This avoids the startup error about missing src/src_base64.
+            if audio_player is not None:
+                try:
+                    page.overlay.remove(audio_player)
+                except (ValueError, AttributeError):
+                    pass
+
+            audio_player = ft.Audio(src=current_mp3_path, autoplay=False)
+            page.overlay.append(audio_player)
+
             play_btn.disabled = False
             play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
             is_playing = False
