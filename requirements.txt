@@ -1,2 +1,2 @@
-flet==0.24.1
-edge-tts
+flet==0.25.2
+edge-tts @ git+https://github.com/HarryXiaoCN/edge-tts.git@sec-ms-gec-v2
