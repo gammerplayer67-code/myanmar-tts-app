@@ -179,6 +179,10 @@ async def main(page: ft.Page):
     is_playing = False
     is_paused = False
     playback_completed = False
+    audio_duration_seconds = 0.0
+    playback_elapsed_seconds = 0.0
+    playback_started_at = None
+    playback_timer_task = None
 
     # Audio is non-visual. Register it as a service when supported to avoid
     # a blank grey area being added to the page layout.
@@ -454,35 +458,50 @@ async def main(page: ft.Page):
 
     result_info = ft.Text("No audio generated yet", size=12, color=TEXT_MUTED)
 
-    def on_audio_state_change(e):
-        nonlocal is_playing, is_paused, playback_completed
-        state_value = getattr(e, "state", None) or getattr(e, "data", "")
-        state = str(state_value or "").strip().lower()
-        if state in ("completed", "stopped", "ended"):
-            is_playing = False
-            is_paused = False
-            playback_completed = True
-            play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
-            page.update()
+    async def mark_playback_completed(remaining_seconds):
+        nonlocal is_playing, is_paused, playback_completed, playback_elapsed_seconds, playback_started_at
+        try:
+            await asyncio.sleep(max(0.1, remaining_seconds))
+            if is_playing:
+                is_playing = False
+                is_paused = False
+                playback_completed = True
+                playback_elapsed_seconds = audio_duration_seconds
+                playback_started_at = None
+                play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+                page.update()
+        except asyncio.CancelledError:
+            pass
 
     def toggle_play(e):
         nonlocal is_playing, is_paused, playback_completed
+        nonlocal playback_elapsed_seconds, playback_started_at, playback_timer_task
         if not current_mp3_path or audio_player is None:
             return
         try:
             if is_playing:
                 audio_player.pause()
+                if playback_started_at is not None:
+                    playback_elapsed_seconds += time.monotonic() - playback_started_at
+                playback_started_at = None
                 is_playing = False
                 is_paused = True
+                if playback_timer_task is not None:
+                    playback_timer_task.cancel()
+                    playback_timer_task = None
                 play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
             else:
                 if is_paused and not playback_completed:
                     audio_player.resume()
                 else:
                     audio_player.play()
+                    playback_elapsed_seconds = 0.0
                 is_playing = True
                 is_paused = False
                 playback_completed = False
+                playback_started_at = time.monotonic()
+                remaining = max(0.1, audio_duration_seconds - playback_elapsed_seconds)
+                playback_timer_task = asyncio.create_task(mark_playback_completed(remaining))
                 play_btn.icon = ft.icons.PAUSE_CIRCLE_FILLED_ROUNDED
         except Exception as ex:
             status_label.value = f"❌ Audio Error: {str(ex)[:100]}"
@@ -619,7 +638,6 @@ async def main(page: ft.Page):
             audio_player = ft.Audio(
                 src=current_mp3_path,
                 autoplay=False,
-                on_state_change=on_audio_state_change,
             )
             attach_audio_player(audio_player)
 
@@ -628,6 +646,10 @@ async def main(page: ft.Page):
             is_playing = False
             is_paused = False
             playback_completed = False
+            audio_duration_seconds = duration_ms / 1000.0
+            playback_elapsed_seconds = 0.0
+            playback_started_at = None
+            playback_timer_task = None
 
             sec = round(duration_ms / 1000, 1)
             result_info.value = f"{selected_label} ({rate}) • {sec}s • {len(sub_texts)} SRT lines"
