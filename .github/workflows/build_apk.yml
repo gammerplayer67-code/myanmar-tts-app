@@ -18,26 +18,30 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.24.3'
-          channel: 'stable'
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.1'
+          channel: 'stable'
+
+      - name: Accept Android Licenses
+        run: yes | flutter doctor --android-licenses || true
+
       - name: Install Flet & Dependencies
         run: |
           pip install --upgrade pip
-          pip install flet==0.24.1 edge-tts
+          pip install "flet[all]==0.25.2"
+          pip install git+https://github.com/HarryXiaoCN/edge-tts.git@sec-ms-gec-v2
 
       - name: Build APK
         run: |
-          flet build apk --project "Myanmar TTS Studio" --description "Myanmar Multilingual TTS Studio Pro"
+          flet build apk --project "Myanmar TTS Studio" --description "Myanmar Multilingual TTS Studio Pro" --yes
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
