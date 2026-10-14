@@ -41,7 +41,7 @@ jobs:
 
       - name: Build APK
         run: |
-          flet build apk --project "Myanmar TTS Studio" --description "Myanmar Multilingual TTS Studio Pro" --yes
+          flet build apk --project "Myanmar TTS Studio" --description "Myanmar Multilingual TTS Studio Pro" --verbose
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
