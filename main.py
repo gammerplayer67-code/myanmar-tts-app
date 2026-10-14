@@ -370,6 +370,17 @@ async def main(page: ft.Page):
         char_count_text.value = f"{len(txt)} chars • {sentences} ။"
         page.update()
 
+    output_name_input = ft.TextField(
+        label="ဖိုင်အမည် (MP3 / SRT)",
+        hint_text="ဥပမာ - my_movie_voice",
+        value="myanmar_tts",
+        prefix_icon=ft.icons.DRIVE_FILE_RENAME_OUTLINED,
+        border_color=BORDER_COLOR,
+        focused_border_color=ACCENT_PURPLE,
+        border_radius=12,
+        text_size=14,
+    )
+
     script_input = ft.TextField(
         hint_text="အသံထုတ်လိုသော မြန်မာစာသားကို ဒီနေရာမှာ ရိုက်ထည့်ပါ...",
         hint_style=ft.TextStyle(color="#475569", size=13),
@@ -431,6 +442,7 @@ async def main(page: ft.Page):
                         ),
                     ],
                 ),
+                output_name_input,
                 script_input,
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -500,6 +512,9 @@ async def main(page: ft.Page):
                 else:
                     if playback_completed:
                         try:
+                            # Reload the source before replaying; long files can leave
+                            # the Android native player in an ended state.
+                            audio_player.src = current_mp3_path
                             audio_player.seek(0)
                         except Exception:
                             pass
@@ -520,35 +535,50 @@ async def main(page: ft.Page):
     play_btn.on_click = toggle_play
 
     async def save_output_file(path, label, extension):
-        """Keep saving reliable on Android/Flet 0.25.2 without opening the
-        FilePicker native dialog, which was blanking the app on this build.
-        Generation already targets Android Downloads when that folder is writable.
-        """
+        """Rename/copy the generated file into Android Downloads when possible."""
+        nonlocal current_mp3_path, current_srt_path
         if not path or not os.path.isfile(path):
-            status_label.value = f"⚠️ {label} ဖိုင်ကို မတွေ့ပါ။ အသံ/SRT ကို ပြန်ထုတ်ကြည့်ပါ။"
+            status_label.value = f"⚠️ {label} ဖိုင် မတွေ့ပါ။ အရင်ထုတ်ပေးပါ။"
             status_label.color = "#F59E0B"
             page.update()
             return
 
         try:
+            raw_name = (output_name_input.value or "myanmar_tts").strip()
+            # Keep a safe filename on Android and remove any user-entered extension.
+            safe_name = re.sub(r'[\\/:*?"<>|]+', "_", raw_name).strip(" .")
+            safe_name = re.sub(r"\s+", "_", safe_name) or "myanmar_tts"
+            if safe_name.lower().endswith("." + extension.lower()):
+                safe_name = safe_name[:-(len(extension) + 1)].rstrip(" .") or "myanmar_tts"
+            filename = f"{safe_name}.{extension}"
             downloads_dir = "/storage/emulated/0/Download"
-            absolute_path = os.path.abspath(path)
+            source_abs = os.path.abspath(path)
             downloads_abs = os.path.abspath(downloads_dir)
 
-            # The generated file is already in Downloads: no extra copy or picker needed.
-            if absolute_path.startswith(downloads_abs + os.sep):
-                status_label.value = f"✅ {label} ဖိုင်ကို Downloads ထဲမှာ သိမ်းပြီးပါပြီ။"
+            if os.path.isdir(downloads_dir) and os.access(downloads_dir, os.W_OK):
+                destination = os.path.join(downloads_dir, filename)
+                if source_abs != os.path.abspath(destination):
+                    shutil.copyfile(path, destination)
+                if label == "MP3":
+                    current_mp3_path = destination
+                else:
+                    current_srt_path = destination
+                status_label.value = f"✅ {filename} ကို Downloads ထဲ သိမ်းပြီးပါပြီ။"
                 status_label.color = "#10B981"
-            elif os.path.isdir(downloads_dir) and os.access(downloads_dir, os.W_OK):
-                destination = os.path.join(downloads_dir, os.path.basename(path))
-                shutil.copyfile(path, destination)
-                status_label.value = f"✅ {label} ဖိုင်ကို Downloads ထဲသို့ သိမ်းပြီးပါပြီ။"
+            elif source_abs.startswith(downloads_abs + os.sep):
+                destination = os.path.join(os.path.dirname(path), filename)
+                if source_abs != os.path.abspath(destination):
+                    shutil.move(path, destination)
+                if label == "MP3":
+                    current_mp3_path = destination
+                else:
+                    current_srt_path = destination
+                status_label.value = f"✅ {filename} အမည်ပြောင်းပြီးပါပြီ။"
                 status_label.color = "#10B981"
             else:
-                # Do not launch the incompatible native picker and risk a blank screen.
                 status_label.value = (
-                    f"⚠️ {label} ဖိုင်ကို app ထဲမှာ ထုတ်ပြီးပါပြီ။ Android က Downloads access ကို "
-                    "ခွင့်မပြုသေးလို့ Downloads ထဲသို့ အလိုအလျောက် မကူးနိုင်ပါ။"
+                    f"⚠️ {label} ကို app ထဲမှာ ထုတ်ပြီးပါပြီ၊ ဒါပေမဲ့ Android Downloads ခွင့်ပြုချက်မရှိပါ။ "
+                    "ဖိုင်အမည်ပြောင်းပြီး Downloads ထဲသိမ်းဖို့ Android storage permission လိုပါတယ်။"
                 )
                 status_label.color = "#F59E0B"
         except Exception as ex:
@@ -647,11 +677,15 @@ async def main(page: ft.Page):
         page.update()
 
         timestamp = int(time.time())
+        raw_name = (output_name_input.value or "myanmar_tts").strip()
+        safe_name = re.sub(r'[\\/:*?"<>|]+', "_", raw_name).strip(" .")
+        safe_name = re.sub(r"\s+", "_", safe_name) or "myanmar_tts"
+        safe_name = re.sub(r"\.(mp3|srt)$", "", safe_name, flags=re.IGNORECASE).strip(" .") or "myanmar_tts"
         dl_dir = "/storage/emulated/0/Download"
         target_dir = dl_dir if (os.path.exists(dl_dir) and os.access(dl_dir, os.W_OK)) else OUTPUT_DIR
 
-        mp3_file = os.path.join(target_dir, f"mm_tts_{timestamp}.mp3")
-        srt_file = os.path.join(target_dir, f"mm_tts_{timestamp}.srt")
+        mp3_file = os.path.join(target_dir, f"{safe_name}_{timestamp}.mp3")
+        srt_file = os.path.join(target_dir, f"{safe_name}_{timestamp}.srt")
 
         async def update_prog(idx, total):
             progress_bar.value = (idx + 1) / total
@@ -682,6 +716,7 @@ async def main(page: ft.Page):
             audio_player = ft.Audio(
                 src=current_mp3_path,
                 autoplay=False,
+                visible=False,
                 on_state_changed=on_audio_state_changed,
             )
             attach_audio_player(audio_player)
@@ -699,7 +734,11 @@ async def main(page: ft.Page):
             sec = round(duration_ms / 1000, 1)
             result_info.value = f"{selected_label} ({rate}) • {sec}s • {len(sub_texts)} SRT lines"
             result_card.visible = True
-            status_label.value = "✅ အောင်မြင်စွာ ထုတ်ပြီးပါပြီ!"
+            status_label.value = (
+                f"✅ ပြီးပါပြီ။ MP3 ({os.path.basename(mp3_file)}) နဲ့ "
+                f"SRT ({os.path.basename(srt_file)}) ထုတ်ပြီးပါပြီ။ "
+                "ဖိုင်အမည်ပြောင်းပြီး Downloads ထဲသိမ်းရန် အောက်က MP3 / SRT ခလုတ်ကိုနှိပ်ပါ။"
+            )
             status_label.color = "#10B981"
 
         except Exception as ex:
