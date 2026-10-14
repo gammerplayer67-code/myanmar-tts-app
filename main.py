@@ -338,4 +338,277 @@ async def main(page: ft.Page):
         txt = script_input.value or ""
         sentences = txt.count("။")
         char_count_text.value = f"{len(txt)} chars • {sentences} ။"
-        page
+        page.update()
+
+    script_input = ft.TextField(
+        hint_text="အသံထုတ်လိုသော မြန်မာစာသားကို ဒီနေရာမှာ ရိုက်ထည့်ပါ...",
+        hint_style=ft.TextStyle(color="#475569", size=13),
+        multiline=True,
+        min_lines=7,
+        max_lines=12,
+        bgcolor="#0B0F19",
+        border_color=BORDER_COLOR,
+        focused_border_color=ACCENT_PURPLE,
+        border_radius=12,
+        text_size=14,
+        on_change=update_stats,
+    )
+
+    async def paste_clipboard(e):
+        clip = await page.get_clipboard_async()
+        if clip:
+            script_input.value = (script_input.value or "") + clip
+            update_stats()
+
+    def clear_script(e):
+        script_input.value = ""
+        update_stats()
+
+    script_card = ft.Container(
+        bgcolor=CARD_BG,
+        border=ft.border.all(1, BORDER_COLOR),
+        border_radius=18,
+        padding=16,
+        content=ft.Column(
+            spacing=10,
+            controls=[
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    controls=[
+                        ft.Row(
+                            spacing=6,
+                            controls=[
+                                ft.Icon(ft.icons.DESCRIPTION_ROUNDED, color=ACCENT_PURPLE, size=18),
+                                ft.Text("Script စာသား", size=14, weight=ft.FontWeight.W_600),
+                            ],
+                        ),
+                        ft.Row(
+                            spacing=4,
+                            controls=[
+                                ft.TextButton(
+                                    "Paste",
+                                    icon=ft.icons.CONTENT_PASTE_ROUNDED,
+                                    style=ft.ButtonStyle(color=ACCENT_CYAN),
+                                    on_click=paste_clipboard,
+                                ),
+                                ft.TextButton(
+                                    "Clear",
+                                    icon=ft.icons.DELETE_SWEEP_ROUNDED,
+                                    style=ft.ButtonStyle(color="#EF4444"),
+                                    on_click=clear_script,
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                script_input,
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    controls=[
+                        ft.Text("💡 ပုဒ်မ (။) တစ်ခုချင်းစီအလိုက် အသံဖြတ်ထုတ်ပေးပါသည်", size=11, color=TEXT_MUTED),
+                        char_count_text,
+                    ],
+                ),
+            ],
+        ),
+    )
+
+    progress_bar = ft.ProgressBar(
+        value=0,
+        color=ACCENT_CYAN,
+        bgcolor="#0B0F19",
+        height=6,
+        border_radius=4,
+        visible=False,
+    )
+    status_label = ft.Text("အသံထုတ်ရန် အသင့်ရှိပါသည်။", size=13, color=TEXT_MUTED)
+
+    play_btn = ft.IconButton(
+        icon=ft.icons.PLAY_CIRCLE_FILL_ROUNDED,
+        icon_color=ACCENT_CYAN,
+        icon_size=42,
+        disabled=True,
+    )
+
+    result_info = ft.Text("No audio generated yet", size=12, color=TEXT_MUTED)
+
+    def toggle_play(e):
+        nonlocal is_playing
+        if not current_mp3_path:
+            return
+        if not is_playing:
+            audio_player.play()
+            play_btn.icon = ft.icons.PAUSE_CIRCLE_FILLED_ROUNDED
+            is_playing = True
+        else:
+            audio_player.pause()
+            play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+            is_playing = False
+        page.update()
+
+    play_btn.on_click = toggle_play
+
+    def share_mp3(e):
+        if current_mp3_path and os.path.exists(current_mp3_path):
+            page.share_files([current_mp3_path], text="Myanmar TTS Audio (MP3)")
+
+    def share_srt(e):
+        if current_srt_path and os.path.exists(current_srt_path):
+            page.share_files([current_srt_path], text="Myanmar TTS Subtitle (SRT)")
+
+    result_card = ft.Container(
+        bgcolor=CARD_BG,
+        border=ft.border.all(1, BORDER_COLOR),
+        border_radius=18,
+        padding=16,
+        visible=False,
+        content=ft.Column(
+            spacing=12,
+            controls=[
+                ft.Row(
+                    spacing=12,
+                    controls=[
+                        play_btn,
+                        ft.Column(
+                            spacing=2,
+                            expand=True,
+                            controls=[
+                                ft.Text("🎧 Output Studio Player", size=14, weight=ft.FontWeight.BOLD),
+                                result_info,
+                            ],
+                        ),
+                    ],
+                ),
+                ft.Row(
+                    spacing=10,
+                    controls=[
+                        ft.ElevatedButton(
+                            "MP3 သိမ်းမယ် / ပို့မယ်",
+                            icon=ft.icons.AUDIO_FILE_ROUNDED,
+                            bgcolor="#1E293B",
+                            color="#FFFFFF",
+                            expand=True,
+                            on_click=share_mp3,
+                        ),
+                        ft.ElevatedButton(
+                            "SRT သိမ်းမယ် / ပို့မယ်",
+                            icon=ft.icons.SUBTITLES_ROUNDED,
+                            bgcolor="#1E293B",
+                            color=ACCENT_CYAN,
+                            expand=True,
+                            on_click=share_srt,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    )
+
+    btn_text = ft.Text("🎙️ AUDIO + SRT စတင်ထုတ်မယ်", size=15, weight=ft.FontWeight.BOLD, color="#FFFFFF")
+
+    async def start_generation(e):
+        nonlocal current_mp3_path, current_srt_path, is_playing
+        script = normalize_script(script_input.value)
+        if not script:
+            status_label.value = "⚠️ ကျေးဇူးပြု၍ Script စာသား အရင်ထည့်ပေးပါ။"
+            status_label.color = "#F59E0B"
+            page.update()
+            return
+
+        selected_label = voice_dropdown.value
+        voice_id = voice_map.get(selected_label, DEFAULT_VOICE_ID)
+        rate = speed_to_rate(speed_slider.value)
+        chunks = split_for_tts(script)
+
+        generate_container.disabled = True
+        btn_text.value = "⏳ အသံထုတ်နေပါသည်..."
+        progress_bar.visible = True
+        progress_bar.value = 0.05
+        result_card.visible = False
+        status_label.color = ACCENT_CYAN
+        page.update()
+
+        timestamp = int(time.time())
+        dl_dir = "/storage/emulated/0/Download"
+        target_dir = dl_dir if (os.path.exists(dl_dir) and os.access(dl_dir, os.W_OK)) else OUTPUT_DIR
+
+        mp3_file = os.path.join(target_dir, f"mm_tts_{timestamp}.mp3")
+        srt_file = os.path.join(target_dir, f"mm_tts_{timestamp}.srt")
+
+        async def update_prog(idx, total):
+            progress_bar.value = (idx + 1) / total
+            status_label.value = f"🎙️ အသံထုတ်နေသည်... အပိုင်း ({idx + 1}/{total})"
+            page.update()
+
+        try:
+            duration_ms = await synthesize_and_merge(
+                chunks, voice_id, rate, mp3_file, update_prog
+            )
+
+            status_label.value = "📝 SRT Subtitle ဖိုင် ပြုလုပ်နေသည်..."
+            page.update()
+
+            sub_texts = split_for_srt(script)
+            srt_entries = make_srt_entries(sub_texts, duration_ms)
+            with open(srt_file, "w", encoding="utf-8-sig", newline="\n") as f:
+                f.write(build_srt(srt_entries))
+
+            current_mp3_path = mp3_file
+            current_srt_path = srt_file
+            audio_player.src = current_mp3_path
+            play_btn.disabled = False
+            play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+            is_playing = False
+
+            sec = round(duration_ms / 1000, 1)
+            result_info.value = f"{selected_label} ({rate}) • {sec}s • {len(sub_texts)} SRT lines"
+            result_card.visible = True
+            status_label.value = "✅ အောင်မြင်စွာ ထုတ်ပြီးပါပြီ!"
+            status_label.color = "#10B981"
+
+        except Exception as ex:
+            status_label.value = f"❌ Error: {str(ex)[:120]}"
+            status_label.color = "#EF4444"
+        finally:
+            generate_container.disabled = False
+            btn_text.value = "🎙️ AUDIO + SRT စတင်ထုတ်မယ်"
+            progress_bar.visible = False
+            page.update()
+
+    generate_container = ft.Container(
+        gradient=ft.LinearGradient(
+            colors=["#7C3AED", "#4F46E5", "#06B6D4"],
+        ),
+        border_radius=16,
+        padding=ft.padding.symmetric(vertical=16),
+        alignment=ft.alignment.center,
+        ink=True,
+        on_click=start_generation,
+        content=btn_text,
+    )
+
+    body = ft.ListView(
+        expand=True,
+        spacing=14,
+        padding=ft.padding.only(left=16, right=16, top=14, bottom=30),
+        controls=[
+            voice_card,
+            script_card,
+            generate_container,
+            progress_bar,
+            ft.Container(alignment=ft.alignment.center, content=status_label),
+            result_card,
+        ],
+    )
+
+    page.add(
+        ft.Column(
+            expand=True,
+            spacing=0,
+            controls=[header_banner, body],
+        )
+    )
+
+    await load_voices()
+
+ft.app(target=main)
