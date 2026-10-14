@@ -3,6 +3,7 @@ import re
 import time
 import tempfile
 import asyncio
+import shutil
 import flet as ft
 import edge_tts
 
@@ -187,6 +188,8 @@ async def main(page: ft.Page):
     # Audio is non-visual. Register it as a service when supported to avoid
     # a blank grey area being added to the page layout.
     audio_player = None
+    file_picker = ft.FilePicker()
+    page.overlay.append(file_picker)
 
     def attach_audio_player(player):
         services = getattr(page, "services", None)
@@ -494,6 +497,11 @@ async def main(page: ft.Page):
                 if is_paused and not playback_completed:
                     audio_player.resume()
                 else:
+                    if playback_completed:
+                        try:
+                            audio_player.seek(0)
+                        except Exception:
+                            pass
                     audio_player.play()
                     playback_elapsed_seconds = 0.0
                 is_playing = True
@@ -510,28 +518,37 @@ async def main(page: ft.Page):
 
     play_btn.on_click = toggle_play
 
-    async def share_file(path, label, message):
+    async def save_output_file(path, label, extension):
         if not path or not os.path.isfile(path):
             status_label.value = f"⚠️ {label} ဖိုင်ကို မတွေ့ပါ။ အသံ/SRT ကို ပြန်ထုတ်ကြည့်ပါ။"
             status_label.color = "#F59E0B"
             page.update()
             return
         try:
-            share_result = page.share_files([path], text=message)
-            if asyncio.iscoroutine(share_result):
-                await share_result
-            status_label.value = f"📤 {label} ဖိုင်မျှဝေရန် ဖွင့်ထားပါပြီ။ Share menu မှ Save/Download ကိုရွေးပါ။"
-            status_label.color = ACCENT_CYAN
+            file_name = os.path.basename(path)
+            destination = await file_picker.save_file(
+                dialog_title=f"{label} ဖိုင် သိမ်းရန်",
+                file_name=file_name,
+                allowed_extensions=[extension],
+            )
+            if not destination:
+                status_label.value = f"ℹ️ {label} သိမ်းဆည်းမှုကို ပယ်ဖျက်လိုက်ပါပြီ။"
+                status_label.color = TEXT_MUTED
+            else:
+                # Flet 0.25.2 returns a destination path; copy the generated file there.
+                shutil.copyfile(path, destination)
+                status_label.value = f"✅ {label} ဖိုင် သိမ်းပြီးပါပြီ။"
+                status_label.color = "#10B981"
         except Exception as ex:
-            status_label.value = f"❌ {label} မျှဝေမရပါ: {str(ex)[:100]}"
+            status_label.value = f"❌ {label} သိမ်းမရပါ: {str(ex)[:120]}"
             status_label.color = "#EF4444"
         page.update()
 
     async def share_mp3(e):
-        await share_file(current_mp3_path, "MP3", "Myanmar TTS Audio (MP3)")
+        await save_output_file(current_mp3_path, "MP3", "mp3")
 
     async def share_srt(e):
-        await share_file(current_srt_path, "SRT", "Myanmar TTS Subtitle (SRT)")
+        await save_output_file(current_srt_path, "SRT", "srt")
 
     result_card = ft.Container(
         bgcolor=CARD_BG,
@@ -582,6 +599,18 @@ async def main(page: ft.Page):
     )
 
     btn_text = ft.Text("🎙️ AUDIO + SRT စတင်ထုတ်မယ်", size=15, weight=ft.FontWeight.BOLD, color="#FFFFFF")
+
+    def on_audio_state_changed(e):
+        nonlocal is_playing, is_paused, playback_completed, playback_elapsed_seconds, playback_started_at
+        state = str(getattr(e, "data", "") or getattr(e, "state", "")).lower()
+        if any(word in state for word in ("completed", "ended", "stopped")):
+            is_playing = False
+            is_paused = False
+            playback_completed = True
+            playback_elapsed_seconds = audio_duration_seconds
+            playback_started_at = None
+            play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+            page.update()
 
     async def start_generation(e):
         nonlocal current_mp3_path, current_srt_path, is_playing, is_paused, playback_completed, audio_player
@@ -638,6 +667,9 @@ async def main(page: ft.Page):
             audio_player = ft.Audio(
                 src=current_mp3_path,
                 autoplay=False,
+                on_state_changed=on_audio_state_changed,
+                width=0,
+                height=0,
             )
             attach_audio_player(audio_player)
 
