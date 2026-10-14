@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
   workflow_dispatch:
 
 jobs:
@@ -16,32 +16,32 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "temurin"
+          java-version: "17"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
-          channel: 'stable'
+          flutter-version: "3.24.5"
+          channel: "stable"
 
       - name: Accept Android Licenses
         run: yes | flutter doctor --android-licenses || true
 
       - name: Install Flet & Dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install "flet[all]==0.25.2"
-          pip install git+https://github.com/HarryXiaoCN/edge-tts.git@sec-ms-gec-v2
+          pip install "git+https://github.com/HarryXiaoCN/edge-tts.git@sec-ms-gec-v2"
 
       - name: Build APK
         run: |
-          flet build apk --project "Myanmar TTS Studio" --description "Myanmar Multilingual TTS Studio Pro" --verbose
+          flet build apk --include-packages flet_audio --project "Myanmar TTS Studio" --description "Myanmar Multilingual TTS Studio Pro" --verbose
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
