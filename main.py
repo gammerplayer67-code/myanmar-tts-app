@@ -374,7 +374,7 @@ async def main(page: ft.Page):
         label="ဖိုင်အမည် (MP3 / SRT)",
         hint_text="ဥပမာ - my_movie_voice",
         value="myanmar_tts",
-        prefix_icon=ft.icons.DRIVE_FILE_RENAME_OUTLINED,
+        prefix_icon=ft.icons.EDIT,
         border_color=BORDER_COLOR,
         focused_border_color=ACCENT_PURPLE,
         border_radius=12,
@@ -716,7 +716,6 @@ async def main(page: ft.Page):
             audio_player = ft.Audio(
                 src=current_mp3_path,
                 autoplay=False,
-                visible=False,
                 on_state_changed=on_audio_state_changed,
             )
             attach_audio_player(audio_player)
