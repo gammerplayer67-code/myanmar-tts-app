@@ -510,7 +510,7 @@ async def main(page: ft.Page):
                 playback_completed = False
                 playback_started_at = time.monotonic()
                 remaining = max(0.1, audio_duration_seconds - playback_elapsed_seconds)
-                playback_timer_task = asyncio.create_task(mark_playback_completed(remaining))
+                playback_timer_task = page.run_task(mark_playback_completed, remaining)
                 play_btn.icon = ft.icons.PAUSE_CIRCLE_FILLED_ROUNDED
         except Exception as ex:
             status_label.value = f"❌ Audio Error: {str(ex)[:100]}"
@@ -520,42 +520,39 @@ async def main(page: ft.Page):
     play_btn.on_click = toggle_play
 
     async def save_output_file(path, label, extension):
+        """Keep saving reliable on Android/Flet 0.25.2 without opening the
+        FilePicker native dialog, which was blanking the app on this build.
+        Generation already targets Android Downloads when that folder is writable.
+        """
         if not path or not os.path.isfile(path):
             status_label.value = f"⚠️ {label} ဖိုင်ကို မတွေ့ပါ။ အသံ/SRT ကို ပြန်ထုတ်ကြည့်ပါ။"
             status_label.color = "#F59E0B"
             page.update()
             return
+
         try:
-            file_name = os.path.basename(path)
-            with open(path, "rb") as source_file:
-                file_bytes = source_file.read()
+            downloads_dir = "/storage/emulated/0/Download"
+            absolute_path = os.path.abspath(path)
+            downloads_abs = os.path.abspath(downloads_dir)
 
-            # Flet versions differ: newer FilePicker APIs require src_bytes on Android.
-            # Use it when supported; keep a compatibility fallback for older APIs.
-            save_parameters = inspect.signature(file_picker.save_file).parameters
-            save_kwargs = {
-                "dialog_title": f"{label} ဖိုင် သိမ်းရန်",
-                "file_name": file_name,
-                "allowed_extensions": [extension],
-            }
-            if "src_bytes" in save_parameters:
-                save_kwargs["src_bytes"] = file_bytes
-
-            destination = await file_picker.save_file(**save_kwargs)
-            if not destination:
-                status_label.value = f"ℹ️ {label} သိမ်းဆည်းမှုကို ပယ်ဖျက်လိုက်ပါပြီ။"
-                status_label.color = TEXT_MUTED
-            elif "src_bytes" in save_parameters:
-                # The Android picker writes the provided bytes to the selected destination.
-                status_label.value = f"✅ {label} ဖိုင် သိမ်းပြီးပါပြီ။"
+            # The generated file is already in Downloads: no extra copy or picker needed.
+            if absolute_path.startswith(downloads_abs + os.sep):
+                status_label.value = f"✅ {label} ဖိုင်ကို Downloads ထဲမှာ သိမ်းပြီးပါပြီ။"
+                status_label.color = "#10B981"
+            elif os.path.isdir(downloads_dir) and os.access(downloads_dir, os.W_OK):
+                destination = os.path.join(downloads_dir, os.path.basename(path))
+                shutil.copyfile(path, destination)
+                status_label.value = f"✅ {label} ဖိုင်ကို Downloads ထဲသို့ သိမ်းပြီးပါပြီ။"
                 status_label.color = "#10B981"
             else:
-                # Older Flet versions return a path and expect Python to copy the file.
-                shutil.copyfile(path, destination)
-                status_label.value = f"✅ {label} ဖိုင် သိမ်းပြီးပါပြီ။"
-                status_label.color = "#10B981"
+                # Do not launch the incompatible native picker and risk a blank screen.
+                status_label.value = (
+                    f"⚠️ {label} ဖိုင်ကို app ထဲမှာ ထုတ်ပြီးပါပြီ။ Android က Downloads access ကို "
+                    "ခွင့်မပြုသေးလို့ Downloads ထဲသို့ အလိုအလျောက် မကူးနိုင်ပါ။"
+                )
+                status_label.color = "#F59E0B"
         except Exception as ex:
-            status_label.value = f"❌ {label} သိမ်းမရပါ: {str(ex)[:120]}"
+            status_label.value = f"❌ {label} သိမ်းမရပါ: {str(ex)[:100]}"
             status_label.color = "#EF4444"
         page.update()
 
