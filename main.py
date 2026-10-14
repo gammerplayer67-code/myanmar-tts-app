@@ -177,10 +177,31 @@ async def main(page: ft.Page):
     current_mp3_path = None
     current_srt_path = None
     is_playing = False
+    is_paused = False
+    playback_completed = False
 
-    # Flet 0.25.2 requires Audio to have a source when it is created.
-    # Create the Audio control only after an MP3 file has been generated.
+    # Audio is non-visual. Register it as a service when supported to avoid
+    # a blank grey area being added to the page layout.
     audio_player = None
+
+    def attach_audio_player(player):
+        services = getattr(page, "services", None)
+        if services is not None:
+            services.append(player)
+        else:
+            page.overlay.append(player)
+
+    def detach_audio_player(player):
+        if player is None:
+            return
+        services = getattr(page, "services", None)
+        for collection in (services, page.overlay):
+            if collection is not None:
+                try:
+                    if player in collection:
+                        collection.remove(player)
+                except (ValueError, AttributeError):
+                    pass
 
     header_banner = ft.Container(
         gradient=ft.LinearGradient(
@@ -433,29 +454,65 @@ async def main(page: ft.Page):
 
     result_info = ft.Text("No audio generated yet", size=12, color=TEXT_MUTED)
 
+    def on_audio_state_change(e):
+        nonlocal is_playing, is_paused, playback_completed
+        state_value = getattr(e, "state", None) or getattr(e, "data", "")
+        state = str(state_value or "").strip().lower()
+        if state in ("completed", "stopped", "ended"):
+            is_playing = False
+            is_paused = False
+            playback_completed = True
+            play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+            page.update()
+
     def toggle_play(e):
-        nonlocal is_playing
+        nonlocal is_playing, is_paused, playback_completed
         if not current_mp3_path or audio_player is None:
             return
-        if not is_playing:
-            audio_player.play()
-            play_btn.icon = ft.icons.PAUSE_CIRCLE_FILLED_ROUNDED
-            is_playing = True
-        else:
-            audio_player.pause()
-            play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
-            is_playing = False
+        try:
+            if is_playing:
+                audio_player.pause()
+                is_playing = False
+                is_paused = True
+                play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+            else:
+                if is_paused and not playback_completed:
+                    audio_player.resume()
+                else:
+                    audio_player.play()
+                is_playing = True
+                is_paused = False
+                playback_completed = False
+                play_btn.icon = ft.icons.PAUSE_CIRCLE_FILLED_ROUNDED
+        except Exception as ex:
+            status_label.value = f"❌ Audio Error: {str(ex)[:100]}"
+            status_label.color = "#EF4444"
         page.update()
 
     play_btn.on_click = toggle_play
 
-    def share_mp3(e):
-        if current_mp3_path and os.path.exists(current_mp3_path):
-            page.share_files([current_mp3_path], text="Myanmar TTS Audio (MP3)")
+    async def share_file(path, label, message):
+        if not path or not os.path.isfile(path):
+            status_label.value = f"⚠️ {label} ဖိုင်ကို မတွေ့ပါ။ အသံ/SRT ကို ပြန်ထုတ်ကြည့်ပါ။"
+            status_label.color = "#F59E0B"
+            page.update()
+            return
+        try:
+            share_result = page.share_files([path], text=message)
+            if asyncio.iscoroutine(share_result):
+                await share_result
+            status_label.value = f"📤 {label} ဖိုင်မျှဝေရန် ဖွင့်ထားပါပြီ။ Share menu မှ Save/Download ကိုရွေးပါ။"
+            status_label.color = ACCENT_CYAN
+        except Exception as ex:
+            status_label.value = f"❌ {label} မျှဝေမရပါ: {str(ex)[:100]}"
+            status_label.color = "#EF4444"
+        page.update()
 
-    def share_srt(e):
-        if current_srt_path and os.path.exists(current_srt_path):
-            page.share_files([current_srt_path], text="Myanmar TTS Subtitle (SRT)")
+    async def share_mp3(e):
+        await share_file(current_mp3_path, "MP3", "Myanmar TTS Audio (MP3)")
+
+    async def share_srt(e):
+        await share_file(current_srt_path, "SRT", "Myanmar TTS Subtitle (SRT)")
 
     result_card = ft.Container(
         bgcolor=CARD_BG,
@@ -508,7 +565,7 @@ async def main(page: ft.Page):
     btn_text = ft.Text("🎙️ AUDIO + SRT စတင်ထုတ်မယ်", size=15, weight=ft.FontWeight.BOLD, color="#FFFFFF")
 
     async def start_generation(e):
-        nonlocal current_mp3_path, current_srt_path, is_playing, audio_player
+        nonlocal current_mp3_path, current_srt_path, is_playing, is_paused, playback_completed, audio_player
         script = normalize_script(script_input.value)
         if not script:
             status_label.value = "⚠️ ကျေးဇူးပြု၍ Script စာသား အရင်ထည့်ပေးပါ။"
@@ -557,20 +614,20 @@ async def main(page: ft.Page):
             current_mp3_path = mp3_file
             current_srt_path = srt_file
 
-            # Create Audio only after a real MP3 source exists.
-            # This avoids the startup error about missing src/src_base64.
-            if audio_player is not None:
-                try:
-                    page.overlay.remove(audio_player)
-                except (ValueError, AttributeError):
-                    pass
-
-            audio_player = ft.Audio(src=current_mp3_path, autoplay=False)
-            page.overlay.append(audio_player)
+            # Replace the previous Audio service only after both files exist.
+            detach_audio_player(audio_player)
+            audio_player = ft.Audio(
+                src=current_mp3_path,
+                autoplay=False,
+                on_state_change=on_audio_state_change,
+            )
+            attach_audio_player(audio_player)
 
             play_btn.disabled = False
             play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
             is_playing = False
+            is_paused = False
+            playback_completed = False
 
             sec = round(duration_ms / 1000, 1)
             result_info.value = f"{selected_label} ({rate}) • {sec}s • {len(sub_texts)} SRT lines"
