@@ -10,41 +10,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.24.5"
-          channel: "stable"
-
-      - name: Accept Android Licenses
-        run: yes | flutter doctor --android-licenses || true
-
-      - name: Install Flet & Dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install "flet[all]==0.25.2"
-          pip install "git+https://github.com/HarryXiaoCN/edge-tts.git@sec-ms-gec-v2"
+          pip install "flet[all]==0.80.5"
+          pip install -r requirements.txt
 
       - name: Build APK
         run: |
           flet build apk --include-packages flet_audio --project "Myanmar TTS Studio" --description "Myanmar Multilingual TTS Studio Pro" --verbose
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: Myanmar-TTS-Studio-APK
           path: build/apk/*.apk
