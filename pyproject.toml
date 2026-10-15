@@ -1,0 +1,16 @@
+[project]
+name = "myanmar-tts-studio"
+version = "1.0.0"
+description = "Myanmar Multilingual TTS Studio Pro"
+requires-python = ">=3.10"
+dependencies = [
+    "flet==0.80.5",
+    "flet-audio==0.80.5",
+    "edge-tts @ git+https://github.com/HarryXiaoCN/edge-tts.git@sec-ms-gec-v2",
+]
+
+[tool.flet]
+product = "Myanmar TTS Studio"
+
+[tool.flet.flutter]
+dependencies = ["flet_audio"]
