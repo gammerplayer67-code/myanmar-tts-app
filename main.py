@@ -2,10 +2,9 @@ import os
 import re
 import time
 import tempfile
-import asyncio
 import shutil
-import inspect
 import flet as ft
+import flet_audio as fta
 import edge_tts
 
 # =========================================================
@@ -181,35 +180,24 @@ async def main(page: ft.Page):
     is_playing = False
     is_paused = False
     playback_completed = False
-    audio_duration_seconds = 0.0
-    playback_elapsed_seconds = 0.0
-    playback_started_at = None
-    playback_timer_task = None
 
-    # Audio is non-visual. Register it as a service when supported to avoid
-    # a blank grey area being added to the page layout.
+    # Audio is a non-visual Flet service. Register it in page.services,
+    # never in page.overlay, so it cannot add a giant blank rectangle to UI.
     audio_player = None
     file_picker = ft.FilePicker()
     page.overlay.append(file_picker)
 
     def attach_audio_player(player):
-        services = getattr(page, "services", None)
-        if services is not None:
-            services.append(player)
-        else:
-            page.overlay.append(player)
+        page.services.append(player)
 
     def detach_audio_player(player):
         if player is None:
             return
-        services = getattr(page, "services", None)
-        for collection in (services, page.overlay):
-            if collection is not None:
-                try:
-                    if player in collection:
-                        collection.remove(player)
-                except (ValueError, AttributeError):
-                    pass
+        try:
+            if player in page.services:
+                page.services.remove(player)
+        except (ValueError, AttributeError):
+            pass
 
     header_banner = ft.Container(
         gradient=ft.LinearGradient(
@@ -374,7 +362,7 @@ async def main(page: ft.Page):
         label="ဖိုင်အမည် (MP3 / SRT)",
         hint_text="ဥပမာ - my_movie_voice",
         value="myanmar_tts",
-        prefix_icon=ft.icons.EDIT,
+        prefix_icon=ft.icons.DRIVE_FILE_RENAME_OUTLINED,
         border_color=BORDER_COLOR,
         focused_border_color=ACCENT_PURPLE,
         border_radius=12,
@@ -474,58 +462,28 @@ async def main(page: ft.Page):
 
     result_info = ft.Text("No audio generated yet", size=12, color=TEXT_MUTED)
 
-    async def mark_playback_completed(remaining_seconds):
-        nonlocal is_playing, is_paused, playback_completed, playback_elapsed_seconds, playback_started_at
-        try:
-            await asyncio.sleep(max(0.1, remaining_seconds))
-            if is_playing:
-                is_playing = False
-                is_paused = False
-                playback_completed = True
-                playback_elapsed_seconds = audio_duration_seconds
-                playback_started_at = None
-                play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
-                page.update()
-        except asyncio.CancelledError:
-            pass
-
-    def toggle_play(e):
+    async def toggle_play(e):
         nonlocal is_playing, is_paused, playback_completed
-        nonlocal playback_elapsed_seconds, playback_started_at, playback_timer_task
         if not current_mp3_path or audio_player is None:
             return
         try:
             if is_playing:
-                audio_player.pause()
-                if playback_started_at is not None:
-                    playback_elapsed_seconds += time.monotonic() - playback_started_at
-                playback_started_at = None
+                await audio_player.pause()
                 is_playing = False
                 is_paused = True
-                if playback_timer_task is not None:
-                    playback_timer_task.cancel()
-                    playback_timer_task = None
                 play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+            elif is_paused and not playback_completed:
+                await audio_player.resume()
+                is_playing = True
+                is_paused = False
+                play_btn.icon = ft.icons.PAUSE_CIRCLE_FILLED_ROUNDED
             else:
-                if is_paused and not playback_completed:
-                    audio_player.resume()
-                else:
-                    if playback_completed:
-                        try:
-                            # Reload the source before replaying; long files can leave
-                            # the Android native player in an ended state.
-                            audio_player.src = current_mp3_path
-                            audio_player.seek(0)
-                        except Exception:
-                            pass
-                    audio_player.play()
-                    playback_elapsed_seconds = 0.0
+                # Play from position zero after completion so long files can
+                # be replayed, using the native player's actual state event.
+                await audio_player.play(position=0)
                 is_playing = True
                 is_paused = False
                 playback_completed = False
-                playback_started_at = time.monotonic()
-                remaining = max(0.1, audio_duration_seconds - playback_elapsed_seconds)
-                playback_timer_task = page.run_task(mark_playback_completed, remaining)
                 play_btn.icon = ft.icons.PAUSE_CIRCLE_FILLED_ROUNDED
         except Exception as ex:
             status_label.value = f"❌ Audio Error: {str(ex)[:100]}"
@@ -643,19 +601,28 @@ async def main(page: ft.Page):
     btn_text = ft.Text("🎙️ AUDIO + SRT စတင်ထုတ်မယ်", size=15, weight=ft.FontWeight.BOLD, color="#FFFFFF")
 
     def on_audio_state_changed(e):
-        nonlocal is_playing, is_paused, playback_completed, playback_elapsed_seconds, playback_started_at
+        nonlocal is_playing, is_paused, playback_completed
         state = str(getattr(e, "data", "") or getattr(e, "state", "")).lower()
-        if any(word in state for word in ("completed", "ended", "stopped")):
+        if any(word in state for word in ("completed", "ended")):
             is_playing = False
             is_paused = False
             playback_completed = True
-            playback_elapsed_seconds = audio_duration_seconds
-            playback_started_at = None
             play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+            page.update()
+        elif "paused" in state:
+            is_playing = False
+            is_paused = True
+            play_btn.icon = ft.icons.PLAY_CIRCLE_FILL_ROUNDED
+            page.update()
+        elif "playing" in state:
+            is_playing = True
+            is_paused = False
+            playback_completed = False
+            play_btn.icon = ft.icons.PAUSE_CIRCLE_FILLED_ROUNDED
             page.update()
 
     async def start_generation(e):
-        nonlocal current_mp3_path, current_srt_path, is_playing, is_paused, playback_completed, audio_player, playback_timer_task
+        nonlocal current_mp3_path, current_srt_path, is_playing, is_paused, playback_completed, audio_player
         script = normalize_script(script_input.value)
         if not script:
             status_label.value = "⚠️ ကျေးဇူးပြု၍ Script စာသား အရင်ထည့်ပေးပါ။"
@@ -708,15 +675,17 @@ async def main(page: ft.Page):
             current_mp3_path = mp3_file
             current_srt_path = srt_file
 
-            # Replace the previous Audio service only after both files exist.
-            if playback_timer_task is not None:
-                playback_timer_task.cancel()
-                playback_timer_task = None
+            # Release the old player and replace it after both files exist.
+            if audio_player is not None:
+                try:
+                    await audio_player.release()
+                except Exception:
+                    pass
             detach_audio_player(audio_player)
-            audio_player = ft.Audio(
+            audio_player = fta.Audio(
                 src=current_mp3_path,
                 autoplay=False,
-                on_state_changed=on_audio_state_changed,
+                on_state_change=on_audio_state_changed,
             )
             attach_audio_player(audio_player)
 
@@ -725,10 +694,6 @@ async def main(page: ft.Page):
             is_playing = False
             is_paused = False
             playback_completed = False
-            audio_duration_seconds = duration_ms / 1000.0
-            playback_elapsed_seconds = 0.0
-            playback_started_at = None
-            playback_timer_task = None
 
             sec = round(duration_ms / 1000, 1)
             result_info.value = f"{selected_label} ({rate}) • {sec}s • {len(sub_texts)} SRT lines"
