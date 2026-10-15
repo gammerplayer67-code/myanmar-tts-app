@@ -1,2 +1,3 @@
-flet==0.25.2
+flet==0.80.5
+flet-audio==0.80.5
 edge-tts @ git+https://github.com/HarryXiaoCN/edge-tts.git@sec-ms-gec-v2
