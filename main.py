@@ -184,8 +184,6 @@ async def main(page: ft.Page):
     # Audio is a non-visual Flet service. Register it in page.services,
     # never in page.overlay, so it cannot add a giant blank rectangle to UI.
     audio_player = None
-    file_picker = ft.FilePicker()
-    page.overlay.append(file_picker)
 
     def attach_audio_player(player):
         page.services.append(player)
